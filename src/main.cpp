@@ -7,18 +7,16 @@
 
 #include "sensesp/signalk/signalk_output.h"
 #include "sensesp/signalk/signalk_put_request_listener.h"
-#include "sensesp/signalk/signalk_value_listener.h"
 #include "sensesp/system/lambda_consumer.h"
 #include "sensesp/ui/config_item.h"
 #include "sensesp_app_builder.h"
 
 #include "chain_counter.h"
 #include "n2k_chain.h"
+#include "sk_watchdog.h"
 
-#if __has_include("wifi_secrets.h")
-#include "wifi_secrets.h"
-#endif
-
+// WIFI_SSID / WIFI_PASSWORD / OTA_PASSWORD: gitignored wifi_secrets.h at the
+// project root, injected by include_secrets.py (-include). Not under src/.
 #ifndef OTA_PASSWORD
 #define OTA_PASSWORD "thisisfine"
 #endif
@@ -57,7 +55,7 @@ void setup() {
       ->set_title("Chain counter")
       ->set_description(
           "Pulse count and metres of rode per gypsy pulse. Survives reboot. "
-          "Set pulse count to 0 when the anchor is fully retrieved.")
+          "Set pulse count or rode to 0 when the anchor is fully retrieved.")
       ->set_sort_order(100);
 
   auto* rode_meta =
@@ -88,7 +86,6 @@ void setup() {
       ->set_sort_order(220);
   counter->dpp_producer().connect_to(dpp_sk);
 
-  // PUTs addressed to this device (SKOutput metadata supports_put).
   auto pulse_put = std::make_shared<SKPutRequestListener<float>>(
       "winches.windlass.pulseCount");
   pulse_put->connect_to(std::make_shared<LambdaConsumer<float>>(
@@ -99,20 +96,17 @@ void setup() {
   dpp_put->connect_to(std::make_shared<LambdaConsumer<float>>(
       [counter](float value) { counter->set_distance_per_pulse(value); }));
 
-  // Same as the original sketch: also follow SK deltas from any source
-  // (webapp PUT that Signal K applied locally).
-  auto pulse_listen = std::make_shared<SKValueListener<float>>(
-      "winches.windlass.pulseCount", 200);
-  pulse_listen->connect_to(std::make_shared<LambdaConsumer<float>>(
-      [counter](float value) { counter->set_pulse_count((int)value); }));
+  auto rode_put = std::make_shared<SKPutRequestListener<float>>(
+      "winches.windlass.rode");
+  rode_put->connect_to(std::make_shared<LambdaConsumer<float>>(
+      [counter](float value) { counter->set_rode(value); }));
 
-  auto dpp_listen = std::make_shared<SKValueListener<float>>(
-      "winches.windlass.distanceperpulse", 200);
-  dpp_listen->connect_to(std::make_shared<LambdaConsumer<float>>(
-      [counter](float value) { counter->set_distance_per_pulse(value); }));
-
-  // Keep the N2K object alive for the life of the app.
-  new N2kChainOutput(kCanTxPin, kCanRxPin, counter.get());
+  auto n2k = std::make_shared<N2kChainOutput>(kCanTxPin, kCanRxPin,
+                                              counter.get());
+  auto watchdog = std::make_shared<SKReconnectWatchdog>(
+      sensesp_app->get_ws_client(), counter);
+  (void)n2k;
+  (void)watchdog;
 
   while (true) {
     loop();

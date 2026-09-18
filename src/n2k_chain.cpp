@@ -9,6 +9,8 @@ bool N2kChainOutput::tx_enabled_ = false;
 
 static const int kDeviceId = 51;
 static const int kDevChain = 0;
+static constexpr unsigned long kMinTxMs = 200;       // 5 Hz
+static constexpr unsigned long kHeartbeatMs = 2000;
 
 N2kChainOutput::N2kChainOutput(gpio_num_t tx_pin, gpio_num_t rx_pin,
                                ChainCounter* counter)
@@ -26,10 +28,9 @@ N2kChainOutput::N2kChainOutput(gpio_num_t tx_pin, gpio_num_t rx_pin,
   nmea2000_.Open();
 
   event_loop()->onTick([this]() { nmea2000_.ParseMessages(); });
+  event_loop()->onRepeat(50, [this]() { this->tick(); });
 
-  event_loop()->onRepeat(2000, [this]() { this->send_length(); });
-
-  counter_->rode_producer().attach([this]() { this->send_length(); });
+  counter_->rode_producer().attach([this]() { this->request_send(); });
 }
 
 void N2kChainOutput::HandleNMEA2000Msg(const tN2kMsg& /*msg*/) {
@@ -39,10 +40,24 @@ void N2kChainOutput::HandleNMEA2000Msg(const tN2kMsg& /*msg*/) {
   }
 }
 
-void N2kChainOutput::send_length() {
+void N2kChainOutput::request_send() { pending_ = true; }
+
+void N2kChainOutput::tick() {
   if (!tx_enabled_ || counter_ == nullptr) {
     return;
   }
+  const unsigned long now = millis();
+  if (pending_ && (now - last_tx_ms_ >= kMinTxMs)) {
+    send_now();
+    pending_ = false;
+    return;
+  }
+  if (now - last_tx_ms_ >= kHeartbeatMs) {
+    send_now();
+  }
+}
+
+void N2kChainOutput::send_now() {
   tN2kMsg msg;
   msg.SetPGN(130824L);
   msg.Priority = 3;
@@ -52,4 +67,5 @@ void N2kChainOutput::send_length() {
   msg.AddByte(0x21);
   msg.Add2ByteDouble(counter_->rode(), 0.01);
   nmea2000_.SendMsg(msg, kDevChain);
+  last_tx_ms_ = millis();
 }

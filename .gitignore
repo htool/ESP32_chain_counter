@@ -10,5 +10,5 @@ sdkconfig.*
 !sdkconfig.defaults
 !sdkconfig.defaults.*
 
-# Local Wi-Fi / OTA secrets (copy from src/wifi_secrets.h.example)
-src/wifi_secrets.h
+# Local Wi-Fi / OTA secrets (copy from wifi_secrets.h.example)
+wifi_secrets.h
